@@ -6,18 +6,22 @@
   <meta name="renderer" content="webkit">
   <meta http-equiv="X-UA-Compatible" content="IE=edge" >
   <link rel="dns-prefetch" href="https://melodycc.gitee.io">
-  <title>Hexo</title>
+  <title>syn/singleflight源码阅读 | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="个人学习记录">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Hexo">
-<meta property="og:url" content="https://melodycc.gitee.io/index.html">
+  <meta name="description" content="singleflight是go扩展库提供的一种并发原语，当有大量并发请求时，只允许一个请求去实际调用这个回调函数，等到这个请求返回结果的时候，再把结果返回给其他几个同时调用了相同函数的请求，这样可以减少并发调用的数量。在实际应用中，它能够在一个服务中减少对下游的并发重复请求。一个常见的使用场景是防止缓存击穿">
+<meta property="og:type" content="article">
+<meta property="og:title" content="syn&#x2F;singleflight源码阅读">
+<meta property="og:url" content="https://melodycc.gitee.io/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="个人学习记录">
+<meta property="og:description" content="singleflight是go扩展库提供的一种并发原语，当有大量并发请求时，只允许一个请求去实际调用这个回调函数，等到这个请求返回结果的时候，再把结果返回给其他几个同时调用了相同函数的请求，这样可以减少并发调用的数量。在实际应用中，它能够在一个服务中减少对下游的并发重复请求。一个常见的使用场景是防止缓存击穿">
 <meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://melodycc.gitee.io/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/1.png">
+<meta property="article:published_time" content="2021-06-21T07:05:55.000Z">
+<meta property="article:modified_time" content="2021-06-21T09:57:23.483Z">
 <meta property="article:author" content="eslody">
-<meta property="article:tag" content="技术学习">
+<meta property="article:tag" content="go">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://melodycc.gitee.io/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/1.png">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -152,16 +156,14 @@
             <canvas data-colors="#eaeaea" data-sectionHeight="100" data-contentId="js-content" id="myCanvas1" class="anm-canvas"></canvas>
           </div>
           <div id="js-content" class="content-ll">
-            
-  
-    <article id="post-syn-singleflight源码阅读" class="article article-type-post  article-index" itemscope itemprop="blogPost">
+            <article id="post-syn-singleflight源码阅读" class="article article-type-post " itemscope itemprop="blogPost">
   <div class="article-inner">
     
       <header class="article-header">
         
   
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/">syn/singleflight源码阅读</a>
+    <h1 class="article-title" itemprop="name">
+      syn/singleflight源码阅读
     </h1>
   
 
@@ -175,9 +177,43 @@
     <div class="article-entry" itemprop="articleBody">
       
         <p>singleflight是go扩展库提供的一种并发原语，当有大量并发请求时，只允许一个请求去实际调用这个回调函数，等到这个请求返回结果的时候，再把结果返回给其他几个同时调用了相同函数的请求，这样可以减少并发调用的数量。在实际应用中，它能够在一个服务中减少对下游的并发重复请求。一个常见的使用场景是防止缓存击穿</p>
-        
+<a id="more"></a>
+
+<p>所谓缓存击穿，指的是大量的并发请求同时查询一个缓存Key时，如果这个Key正好过期失效，就会导致大量的请求都打到数据库上，这种现象就叫作缓存击穿。而singleflight能够在有大量针对同一key的请求时，只让一个请求执行去获取数据，而其他协程阻塞等待结果的返回，因此能有效避免这种现象</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br></pre></td><td class="code"><pre><span class="line">												<span class="comment">//核心数据结构如下：</span></span><br><span class="line"><span class="keyword">type</span> Group <span class="keyword">struct</span> &#123;</span><br><span class="line">	mu sync.Mutex       <span class="comment">//互斥锁</span></span><br><span class="line">	m  <span class="keyword">map</span>[<span class="keyword">string</span>]*call <span class="comment">//对于每一个要获取的key有一个对应的call</span></span><br><span class="line">&#125;</span><br><span class="line"> </span><br><span class="line"><span class="keyword">type</span> call <span class="keyword">struct</span> &#123;</span><br><span class="line">	wg sync.WaitGroup   <span class="comment">//阻塞这个call的其他调用请求</span></span><br><span class="line"> </span><br><span class="line">	<span class="comment">//调用函数后返回的值和error，只会写一次，并且在wg的Done方法执行后才能被读取</span></span><br><span class="line">	val <span class="keyword">interface</span>&#123;&#125;</span><br><span class="line">	err error</span><br><span class="line"> </span><br><span class="line">	forgotten <span class="keyword">bool</span>		<span class="comment">//标识fn方法执行完成之后结果是否立即删除还是保留在singleflight中</span></span><br><span class="line"> </span><br><span class="line">	dups  <span class="keyword">int</span>			<span class="comment">//同时执行一个key的对应call的协程数量</span></span><br><span class="line">	chans []<span class="keyword">chan</span>&lt;- Result</span><br><span class="line">&#125;</span><br><span class="line"> </span><br><span class="line"><span class="comment">//通常用在DoChan方法中</span></span><br><span class="line"><span class="keyword">type</span> Result <span class="keyword">struct</span> &#123;</span><br><span class="line">	Val    <span class="keyword">interface</span>&#123;&#125;</span><br><span class="line">	Err    error</span><br><span class="line">	Shared <span class="keyword">bool</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">												<span class="comment">//核心使用方法如下：</span></span><br><span class="line"><span class="comment">//fn为回调函数</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(g *Group)</span> <span class="title">Do</span><span class="params">(key <span class="keyword">string</span>, fn <span class="keyword">func</span>()</span> <span class="params">(<span class="keyword">interface</span>&#123;&#125;, error)</span>) <span class="params">(v <span class="keyword">interface</span>&#123;&#125;, err error, shared <span class="keyword">bool</span>)</span></span> &#123;</span><br><span class="line">	g.mu.Lock()</span><br><span class="line">	<span class="keyword">if</span> g.m == <span class="literal">nil</span> &#123;</span><br><span class="line">		g.m = <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">string</span>]*call)</span><br><span class="line">	&#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">//查看是否是首次执行key的call方法，否的话则阻塞当前协程，等待其他执行call方法的协程唤醒返回数据</span></span><br><span class="line">	<span class="keyword">if</span> c, ok := g.m[key]; ok &#123;</span><br><span class="line">		c.dups++</span><br><span class="line">		g.mu.Unlock()</span><br><span class="line">		c.wg.Wait()</span><br><span class="line"></span><br><span class="line">		<span class="keyword">if</span> e, ok := c.err.(*panicError); ok &#123;</span><br><span class="line">			<span class="built_in">panic</span>(e)</span><br><span class="line">		&#125; <span class="keyword">else</span> <span class="keyword">if</span> c.err == errGoexit &#123;</span><br><span class="line">			runtime.Goexit()</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="keyword">return</span> c.val, c.err, <span class="literal">true</span></span><br><span class="line">	&#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">//首次执行call，新建key对应的value，阻塞其他协程</span></span><br><span class="line">	c := <span class="built_in">new</span>(call)</span><br><span class="line">	c.wg.Add(<span class="number">1</span>)</span><br><span class="line">	g.m[key] = c</span><br><span class="line">	g.mu.Unlock()</span><br><span class="line"></span><br><span class="line">    <span class="comment">//对单一协程执行访问缓存-&gt;数据的操作</span></span><br><span class="line">	g.doCall(c, key, fn)</span><br><span class="line">	<span class="keyword">return</span> c.val, c.err, c.dups &gt; <span class="number">0</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以注意到，<code>Do</code>封锁了其他并发协程调用<code>fn</code>的可能，最终逻辑走向单独需要调用的<code>fn</code>上，但我们需要给它做一些封装，这也就是<code>doCall</code>方法</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(g *Group)</span> <span class="title">doCall</span><span class="params">(c *call, key <span class="keyword">string</span>, fn <span class="keyword">func</span>()</span> <span class="params">(<span class="keyword">interface</span>&#123;&#125;, error)</span>)</span> &#123;</span><br><span class="line">	normalReturn := <span class="literal">false</span>	<span class="comment">//正常执行fn</span></span><br><span class="line">	recovered := <span class="literal">false</span>		<span class="comment">//未正常执行fn，但执行了recover</span></span><br><span class="line"></span><br><span class="line">	<span class="keyword">defer</span> <span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">		<span class="comment">//既没有执行fn也未recover</span></span><br><span class="line">		<span class="keyword">if</span> !normalReturn &amp;&amp; !recovered &#123;</span><br><span class="line">			c.err = errGoexit</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line">		c.wg.Done()</span><br><span class="line">		g.mu.Lock()</span><br><span class="line">		<span class="keyword">defer</span> g.mu.Unlock()</span><br><span class="line">        <span class="comment">//如果未删除记得删掉对应的call</span></span><br><span class="line">		<span class="keyword">if</span> !c.forgotten &#123;</span><br><span class="line">			<span class="built_in">delete</span>(g.m, key)</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line">		<span class="keyword">if</span> e, ok := c.err.(*panicError); ok &#123;</span><br><span class="line">			<span class="keyword">if</span> <span class="built_in">len</span>(c.chans) &gt; <span class="number">0</span> &#123;</span><br><span class="line">				<span class="keyword">go</span> <span class="built_in">panic</span>(e)</span><br><span class="line">				<span class="keyword">select</span> &#123;&#125; </span><br><span class="line">			&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">				<span class="built_in">panic</span>(e)</span><br><span class="line">			&#125;</span><br><span class="line">		&#125; <span class="keyword">else</span> <span class="keyword">if</span> c.err == errGoexit &#123;</span><br><span class="line">			<span class="comment">//已经退出</span></span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">			<span class="comment">//正常返回</span></span><br><span class="line">			<span class="keyword">for</span> _, ch := <span class="keyword">range</span> c.chans &#123;</span><br><span class="line">				ch &lt;- Result&#123;c.val, c.err, c.dups &gt; <span class="number">0</span>&#125;</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;()</span><br><span class="line"></span><br><span class="line">	<span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">		<span class="keyword">defer</span> <span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">			<span class="keyword">if</span> !normalReturn &#123;</span><br><span class="line">				<span class="comment">//若fn panic了则进行recover，并new一个panic型的error</span></span><br><span class="line">				<span class="keyword">if</span> r := <span class="built_in">recover</span>(); r != <span class="literal">nil</span> &#123;</span><br><span class="line">					c.err = newPanicError(r)</span><br><span class="line">				&#125;</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;()</span><br><span class="line">		<span class="comment">//这步才是所有的核心操作</span></span><br><span class="line">		c.val, c.err = fn()</span><br><span class="line">        <span class="comment">//若fn 未panic则执行到这步返回</span></span><br><span class="line">		normalReturn = <span class="literal">true</span></span><br><span class="line">	&#125;()</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span> !normalReturn &#123;</span><br><span class="line">		recovered = <span class="literal">true</span></span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>当然还有一些其他的方法，如下：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//与Do类似，不同之处在于Do是同步返回结果，DoChan返回一个channel（每个协程都有各自单独的channel），异步将结果返回</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(g *Group)</span> <span class="title">DoChan</span><span class="params">(key <span class="keyword">string</span>, fn <span class="keyword">func</span>()</span> <span class="params">(<span class="keyword">interface</span>&#123;&#125;, error)</span>) &lt;-<span class="title">chan</span> <span class="title">Result</span></span> &#123;</span><br><span class="line">	ch := <span class="built_in">make</span>(<span class="keyword">chan</span> Result, <span class="number">1</span>)</span><br><span class="line">	g.mu.Lock()</span><br><span class="line">	<span class="keyword">if</span> g.m == <span class="literal">nil</span> &#123;</span><br><span class="line">		g.m = <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">string</span>]*call)</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> c, ok := g.m[key]; ok &#123;</span><br><span class="line">		c.dups++</span><br><span class="line">		c.chans = <span class="built_in">append</span>(c.chans, ch)</span><br><span class="line">		g.mu.Unlock()</span><br><span class="line">		<span class="keyword">return</span> ch</span><br><span class="line">	&#125;</span><br><span class="line">	c := &amp;call&#123;chans: []<span class="keyword">chan</span>&lt;- Result&#123;ch&#125;&#125;</span><br><span class="line">	c.wg.Add(<span class="number">1</span>)</span><br><span class="line">	g.m[key] = c</span><br><span class="line">	g.mu.Unlock()</span><br><span class="line"> </span><br><span class="line">	<span class="keyword">go</span> g.doCall(c, key, fn)</span><br><span class="line"> </span><br><span class="line">	<span class="keyword">return</span> ch</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="comment">//将key从map中删除</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(g *Group)</span> <span class="title">Forget</span><span class="params">(key <span class="keyword">string</span>)</span></span> &#123;</span><br><span class="line">	g.mu.Lock()</span><br><span class="line">	<span class="keyword">if</span> c, ok := g.m[key]; ok &#123;</span><br><span class="line">		c.forgotten = <span class="literal">true</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="built_in">delete</span>(g.m, key)</span><br><span class="line">	g.mu.Unlock()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>大致逻辑图如下：</p>
+<p><img src="/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/1.png" alt="pic1"></p>
+
       
 
+      
+        <div class="page-reward">
+          <a href="javascript:;" class="page-reward-btn tooltip-top">
+            <div class="tooltip tooltip-east">
+            <span class="tooltip-item">
+              赏
+            </span>
+            <span class="tooltip-content">
+              <span class="tooltip-text">
+                <span class="tooltip-inner">
+                  <p class="reward-p"><i class="icon icon-quo-left"></i>谢谢你请我吃糖果<i class="icon icon-quo-right"></i></p>
+                  <div class="reward-box">
+                    
+                    
+                  </div>
+                </span>
+              </span>
+            </span>
+          </div>
+          </a>
+        </div>
       
     </div>
     <div class="article-info article-info-index">
@@ -197,16 +233,75 @@
       
 
       
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/">展开全文 >></a>
-        </p>
-      
 
+      
+        
+<div class="share-btn share-icons tooltip-left">
+  <div class="tooltip tooltip-east">
+    <span class="tooltip-item">
+      <a href="javascript:;" class="share-sns share-outer">
+        <i class="icon icon-share"></i>
+      </a>
+    </span>
+    <span class="tooltip-content">
+      <div class="share-wrap">
+        <div class="share-icons">
+          <a class="weibo share-sns" href="javascript:;" data-type="weibo">
+            <i class="icon icon-weibo"></i>
+          </a>
+          <a class="weixin share-sns wxFab" href="javascript:;" data-type="weixin">
+            <i class="icon icon-weixin"></i>
+          </a>
+          <a class="qq share-sns" href="javascript:;" data-type="qq">
+            <i class="icon icon-qq"></i>
+          </a>
+          <a class="douban share-sns" href="javascript:;" data-type="douban">
+            <i class="icon icon-douban"></i>
+          </a>
+          <a class="qzone share-sns" href="javascript:;" data-type="qzone">
+            <i class="icon icon-qzone"></i>
+          </a>
+          <a class="facebook share-sns" href="javascript:;" data-type="facebook">
+            <i class="icon icon-facebook"></i>
+          </a>
+          <a class="twitter share-sns" href="javascript:;" data-type="twitter">
+            <i class="icon icon-twitter"></i>
+          </a>
+          <a class="google share-sns" href="javascript:;" data-type="google">
+            <i class="icon icon-google"></i>
+          </a>
+        </div>
+      </div>
+    </span>
+  </div>
+</div>
+
+<div class="page-modal wx-share js-wx-box">
+    <a class="close js-modal-close" href="javascript:;"><i class="icon icon-close"></i></a>
+    <p>扫一扫，分享到微信</p>
+    <div class="wx-qrcode">
+      <img src="//pan.baidu.com/share/qrcode?url=https://melodycc.gitee.io/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/" alt="微信分享二维码">
+    </div>
+</div>
+
+<div class="mask js-mask"></div>
       
       <div class="clearfix"></div>
     </div>
   </div>
 </article>
+
+  
+<nav id="article-nav">
+  
+  
+    <a href="/2021/06/09/go-unsafe-Pointer%E5%92%8Cuintptr%E8%A7%A3%E6%9E%90/" id="article-nav-older" class="article-nav-link-wrap">
+      <div class="article-nav-title">go unsafe.Pointer和uintptr解析</div>
+      <i class="icon-circle-right"></i>
+    </a>
+  
+</nav>
+
 
 <aside class="wrap-side-operation">
     <div class="mod-side-operation">
@@ -221,700 +316,32 @@
         </div>
         
         
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-go-unsafe-Pointer和uintptr解析" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/06/09/go-unsafe-Pointer%E5%92%8Cuintptr%E8%A7%A3%E6%9E%90/">go unsafe.Pointer和uintptr解析</a>
-    </h1>
-  
-
-        
-        <a href="/2021/06/09/go-unsafe-Pointer%E5%92%8Cuintptr%E8%A7%A3%E6%9E%90/" class="archive-article-date">
-  	<time datetime="2021-06-09T11:57:11.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-09</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>记录最近遇到的一些问题</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/06/09/go-unsafe-Pointer%E5%92%8Cuintptr%E8%A7%A3%E6%9E%90/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
+        <div class="toc-container tooltip-left">
+            <i class="icon-font icon-category"></i>
+            <div class="tooltip tooltip-east">
+                <span class="tooltip-item">
+                </span>
+                <span class="tooltip-content">
+                    <div class="toc-article">
+                    目录，不存在的…
+                    </div>
+                </span>
             </div>
         </div>
         
-        
     </div>
 </aside>
 
 
 
-
-  
-    <article id="post-net-http源码阅读" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/06/04/net-http%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/">net/http源码阅读</a>
-    </h1>
-  
-
-        
-        <a href="/2021/06/04/net-http%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/" class="archive-article-date">
-  	<time datetime="2021-06-04T05:11:08.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-04</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>golang原生库net/http包下有关服务器基本实现的源码阅读</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/06/04/net-http%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-MapReduce的一些改进" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/05/25/MapReduce%E7%9A%84%E4%B8%80%E4%BA%9B%E6%94%B9%E8%BF%9B/">MapReduce的一些改进</a>
-    </h1>
-  
-
-        
-        <a href="/2021/05/25/MapReduce%E7%9A%84%E4%B8%80%E4%BA%9B%E6%94%B9%E8%BF%9B/" class="archive-article-date">
-  	<time datetime="2021-05-25T03:14:18.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-05-25</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>将MapReduce项目中Wait阶段的处理作了一些优化</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color4">分布式</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/05/25/MapReduce%E7%9A%84%E4%B8%80%E4%BA%9B%E6%94%B9%E8%BF%9B/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-关于快速选择的尾递归" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/25/%E5%85%B3%E4%BA%8E%E5%BF%AB%E9%80%9F%E9%80%89%E6%8B%A9%E7%9A%84%E5%B0%BE%E9%80%92%E5%BD%92/">关于快速选择的尾递归</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/25/%E5%85%B3%E4%BA%8E%E5%BF%AB%E9%80%9F%E9%80%89%E6%8B%A9%E7%9A%84%E5%B0%BE%E9%80%92%E5%BD%92/" class="archive-article-date">
-  	<time datetime="2021-03-25T06:21:06.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-25</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>快速选择通常用于求top k的情况，时间复杂度为O(n)，而空间复杂度由于其存在递归栈深度，为O(logn)，笔者在本文里将递归写法转为迭代法。</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/25/%E5%85%B3%E4%BA%8E%E5%BF%AB%E9%80%9F%E9%80%89%E6%8B%A9%E7%9A%84%E5%B0%BE%E9%80%92%E5%BD%92/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-实现一个MapReduce" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/22/%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AAMapReduce/">实现一个MapReduce</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/22/%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AAMapReduce/" class="archive-article-date">
-  	<time datetime="2021-03-22T06:47:21.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-22</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>开始学习分布式。</p>
-<p>在这个练习中，我们将会使用 Go 实现一个叫作MapReduce的编程模型。</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color4">分布式</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/22/%E5%AE%9E%E7%8E%B0%E4%B8%80%E4%B8%AAMapReduce/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-1-n整数中1出现的次数" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/09/1-n%E6%95%B4%E6%95%B0%E4%B8%AD1%E5%87%BA%E7%8E%B0%E7%9A%84%E6%AC%A1%E6%95%B0/">1~n整数中1出现的次数</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/09/1-n%E6%95%B4%E6%95%B0%E4%B8%AD1%E5%87%BA%E7%8E%B0%E7%9A%84%E6%AC%A1%E6%95%B0/" class="archive-article-date">
-  	<time datetime="2021-03-09T12:11:30.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-09</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>思路大致是依次统计每位1出现的次数，然后加和</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/09/1-n%E6%95%B4%E6%95%B0%E4%B8%AD1%E5%87%BA%E7%8E%B0%E7%9A%84%E6%AC%A1%E6%95%B0/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-一些有关快排的小问题" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/06/%E4%B8%80%E4%BA%9B%E6%9C%89%E5%85%B3%E5%BF%AB%E6%8E%92%E7%9A%84%E5%B0%8F%E9%97%AE%E9%A2%98/">一些有关快排的小问题</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/06/%E4%B8%80%E4%BA%9B%E6%9C%89%E5%85%B3%E5%BF%AB%E6%8E%92%E7%9A%84%E5%B0%8F%E9%97%AE%E9%A2%98/" class="archive-article-date">
-  	<time datetime="2021-03-06T10:51:21.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-06</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>最近在看《算法（第四版）》，发现了一些有关快排的有趣的小知识。</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/06/%E4%B8%80%E4%BA%9B%E6%9C%89%E5%85%B3%E5%BF%AB%E6%8E%92%E7%9A%84%E5%B0%8F%E9%97%AE%E9%A2%98/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-IO多路复用详解" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">IO多路复用详解</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/" class="archive-article-date">
-  	<time datetime="2021-03-05T16:25:26.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-06</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>&nbsp;</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">Linux</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-聊聊虚拟内存" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">聊聊虚拟内存</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/" class="archive-article-date">
-  	<time datetime="2021-03-04T02:21:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-04</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>梳理一下操作系统内存管理方面的内容</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
   
   
-    <nav id="page-nav">
-      <span class="page-number current">1</span><a class="page-number" href="/page/2/">2</a><a class="extend next" rel="next" href="/page/2/">Next &amp;raquo;</a>
-    </nav>
+  
+
+  
+
+  
+
   
 
 
@@ -937,8 +364,8 @@
     <script>
 	var yiliaConfig = {
 		mathjax: false,
-		isHome: true,
-		isPost: false,
+		isHome: false,
+		isPost: true,
 		isArchive: false,
 		isTag: false,
 		isCategory: false,
