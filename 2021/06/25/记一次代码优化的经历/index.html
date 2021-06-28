@@ -6,17 +6,20 @@
   <meta name="renderer" content="webkit">
   <meta http-equiv="X-UA-Compatible" content="IE=edge" >
   <link rel="dns-prefetch" href="https://melodycc.gitee.io">
-  <title>Archives | Hexo</title>
+  <title>记一次代码优化的经历 | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="个人学习记录">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Hexo">
-<meta property="og:url" content="https://melodycc.gitee.io/archives/page/2/index.html">
+  <meta name="description" content="前几天生产机器上的网络监控程序突然挂掉了，排查过后发现是我负责的业务代码复杂度过高。所以将代码重新优化了一下，记录下这次代码优化的过程，权当长个教训">
+<meta property="og:type" content="article">
+<meta property="og:title" content="记一次代码优化的经历">
+<meta property="og:url" content="https://melodycc.gitee.io/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="个人学习记录">
+<meta property="og:description" content="前几天生产机器上的网络监控程序突然挂掉了，排查过后发现是我负责的业务代码复杂度过高。所以将代码重新优化了一下，记录下这次代码优化的过程，权当长个教训">
 <meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2021-06-25T12:13:53.000Z">
+<meta property="article:modified_time" content="2021-06-26T11:59:26.223Z">
 <meta property="article:author" content="eslody">
-<meta property="article:tag" content="技术学习">
+<meta property="article:tag" content="实习记录">
+<meta property="article:tag" content="随笔">
 <meta name="twitter:card" content="summary">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
@@ -152,423 +155,201 @@
             <canvas data-colors="#eaeaea" data-sectionHeight="100" data-contentId="js-content" id="myCanvas1" class="anm-canvas"></canvas>
           </div>
           <div id="js-content" class="content-ll">
-            
-  
-  
+            <article id="post-记一次代码优化的经历" class="article article-type-post " itemscope itemprop="blogPost">
+  <div class="article-inner">
     
-    
-      
-      
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2021" class="archive-year">2021</a>
-        </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/" class="archive-article-date">
-  	<time datetime="2021-03-05T16:25:26.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-06</time>
-</a>
-        </div>
-    	 
+      <header class="article-header">
+        
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">IO多路复用详解</a>
+    <h1 class="article-title" itemprop="name">
+      记一次代码优化的经历
     </h1>
   
 
-        <div class="article-info info-on-right">
-          
+        
+        <a href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" class="archive-article-date">
+  	<time datetime="2021-06-25T12:13:53.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
+</a>
+        
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>前几天生产机器上的网络监控程序突然挂掉了，排查过后发现是我负责的业务代码复杂度过高。所以将代码重新优化了一下，记录下这次代码优化的过程，权当长个教训</p>
+<a id="more"></a>
+
+<p>其实在出问题之前也想到过代码复杂度可能会过高导致服务器宕机，当时也询问了mentor，但是他表示服务器资源是够用的，因为大概只跑这一个程序，所以当时也就没有深入优化。这次挂掉的直接原因应该是又运行了一段新程序，之前复杂度高的代码弊端也就显现出来了</p>
+<h2 id="优化前的解决方案"><a href="#优化前的解决方案" class="headerlink" title="优化前的解决方案"></a>优化前的解决方案</h2><p>整体的业务逻辑很简单，整个公司联通的所有无线ap（<strong>Access</strong> <strong>Point</strong>，无线接入点）每分钟都会受到拨测进行网络监控，如果有异常情况（比如：一星期内有三条时间ap的负载大于50%）就需要对其信息进行筛选，生成告警事件单，并记录目前还未处理事件的告警次数。这次的业务就是对ap up down事件的处理：ap十分钟内无数据上报即判定为ap down。显示在数据库上就是某台ap超过十分钟没有新的记录生成</p>
+<p>我给出的解决方案是：</p>
+<blockquote>
+<ol>
+<li>取数据计算ap消失时间</li>
+<li>当ap消失时间恰好符合10min时处理告警逻辑，如存在未处理告警事件单则告警次数+1，否则生成新的告警事件单</li>
+</ol>
+</blockquote>
+<p>因为数据库是每分钟更新一组最新的ap数据的，所以ap消失时间其实也就等同于数据库中每个ap离最近一次记录相差的分钟数，而第二步实际上是我之前处理其他异常情况所写的处理逻辑。因此真正需要面对的问题是：如何计算数据库中每个ap离最近一次记录相差的分钟数？</p>
+<p>有意思的地方到了，我最终的计算方式正是枚举出这分钟出现的每个ap，然后查每个ap最近的一条记录，时间的差值就是消失时间。然而这也正是代码复杂度高的原因，数据库总共有数万台ap的数据，每分钟要查数据库数万次，这当然很恐怖</p>
+<p>然而，这其实是基于代码复用和整体结构所做的妥协。我当然清楚要计算消失十分钟以上的ap很简单，只需要查出来最近一星期出现的ap，减掉最近十分钟出现的ap就可以，最多只需要查几次数据库。但是由于可能导致重复建单等缘故，只能放弃这个方案，我必须查到确确实实消失了十分钟的ap都有哪些，一分钟不能多，一分钟不能少</p>
+<h2 id="优化后的解决方案"><a href="#优化后的解决方案" class="headerlink" title="优化后的解决方案"></a>优化后的解决方案</h2><p>服务器宕机后我又重新思考了之前的方案，发现其实也是可以利用的，关键在于如何准确地找到恰好十分钟无数据上报的ap？</p>
+<p>很简单，作差集的不该是十分钟内出现的ap和一星期内出现的ap，而应该分别是十分钟内和十一分钟内出现的ap。因为整个程序是每分钟一直运行的，整个服务是动态的，ap拨测数据上报也是动态的，所以此前消失的ap就不需要管，它终究会再次出现，而如果再次收到这台ap拨测的数据后，整个程序就会重新执行这套逻辑，来检验它未来十分钟会不会消失，会不会down掉。步骤更是只需要简单的一条sql语句即可</p>
+<h2 id="思考"><a href="#思考" class="headerlink" title="思考"></a>思考</h2><p>这次的经历下来最大的感想首先是要有动态的视角，去体会程序动态化运行的过程所带来的收益，这个收益远远比你想象的大。</p>
+<p>其次就是要有钻研精神和成本意识，要尽可能地深入思考哪些可以优化的点，不要因为资源够就暂时不去想、懒得想，因为终有一天资源是会不足的，要确保你写下的代码是牢不可破的，用最小的成本去做最大效益的结果，效率远比堆成本重要得多</p>
+
+      
+
+      
+        <div class="page-reward">
+          <a href="javascript:;" class="page-reward-btn tooltip-top">
+            <div class="tooltip tooltip-east">
+            <span class="tooltip-item">
+              赏
+            </span>
+            <span class="tooltip-content">
+              <span class="tooltip-text">
+                <span class="tooltip-inner">
+                  <p class="reward-p"><i class="icon icon-quo-left"></i>谢谢你请我吃糖果<i class="icon icon-quo-right"></i></p>
+                  <div class="reward-box">
+                    
+                    
+                  </div>
+                </span>
+              </span>
+            </span>
+          </div>
+          </a>
+        </div>
+      
+    </div>
+    <div class="article-info article-info-index">
+      
+      
 	<div class="article-tag tagcloud">
 		<i class="icon-price-tags icon"></i>
 		<ul class="article-tag-list">
 			 
         		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">Linux</a>
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">实习记录</a>
         		</li>
       		 
         		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">随笔</a>
         		</li>
       		
 		</ul>
 	</div>
 
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/" class="archive-article-date">
-  	<time datetime="2021-03-04T02:21:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-04</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">聊聊虚拟内存</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/03/%E6%AD%A3%E5%88%99%E8%A1%A8%E8%BE%BE%E5%BC%8F-Regular-Expression/" class="archive-article-date">
-  	<time datetime="2021-03-03T10:20:49.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-03</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/03/%E6%AD%A3%E5%88%99%E8%A1%A8%E8%BE%BE%E5%BC%8F-Regular-Expression/">正则表达式(Regular Expression)</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">工具</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/02/go%E6%8C%87%E5%8D%97%E2%80%94%E2%80%94%E7%BB%83%E4%B9%A0%EF%BC%9Aweb%E7%88%AC%E8%99%AB/" class="archive-article-date">
-  	<time datetime="2021-03-02T07:59:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-02</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/02/go%E6%8C%87%E5%8D%97%E2%80%94%E2%80%94%E7%BB%83%E4%B9%A0%EF%BC%9Aweb%E7%88%AC%E8%99%AB/">go指南——练习：web爬虫</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/02/24/printf%E6%89%A7%E8%A1%8C%E5%8E%9F%E7%90%86/" class="archive-article-date">
-  	<time datetime="2021-02-24T10:25:08.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-02-24</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/02/24/printf%E6%89%A7%E8%A1%8C%E5%8E%9F%E7%90%86/">printf执行原理</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/02/23/SYN%E6%B4%AA%E6%B3%9B%E6%94%BB%E5%87%BB%E5%8E%9F%E7%90%86%E5%8F%8A%E9%98%B2%E5%BE%A1/" class="archive-article-date">
-  	<time datetime="2021-02-23T08:03:21.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-02-23</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/02/23/SYN%E6%B4%AA%E6%B3%9B%E6%94%BB%E5%87%BB%E5%8E%9F%E7%90%86%E5%8F%8A%E9%98%B2%E5%BE%A1/">SYN洪泛攻击原理及防御</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
       
-        </div></section>
+
       
+
       
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2020" class="archive-year">2020</a>
+        
+<div class="share-btn share-icons tooltip-left">
+  <div class="tooltip tooltip-east">
+    <span class="tooltip-item">
+      <a href="javascript:;" class="share-sns share-outer">
+        <i class="icon icon-share"></i>
+      </a>
+    </span>
+    <span class="tooltip-content">
+      <div class="share-wrap">
+        <div class="share-icons">
+          <a class="weibo share-sns" href="javascript:;" data-type="weibo">
+            <i class="icon icon-weibo"></i>
+          </a>
+          <a class="weixin share-sns wxFab" href="javascript:;" data-type="weixin">
+            <i class="icon icon-weixin"></i>
+          </a>
+          <a class="qq share-sns" href="javascript:;" data-type="qq">
+            <i class="icon icon-qq"></i>
+          </a>
+          <a class="douban share-sns" href="javascript:;" data-type="douban">
+            <i class="icon icon-douban"></i>
+          </a>
+          <a class="qzone share-sns" href="javascript:;" data-type="qzone">
+            <i class="icon icon-qzone"></i>
+          </a>
+          <a class="facebook share-sns" href="javascript:;" data-type="facebook">
+            <i class="icon icon-facebook"></i>
+          </a>
+          <a class="twitter share-sns" href="javascript:;" data-type="twitter">
+            <i class="icon icon-twitter"></i>
+          </a>
+          <a class="google share-sns" href="javascript:;" data-type="google">
+            <i class="icon icon-google"></i>
+          </a>
         </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/12/Arrays-asList%E5%9F%BA%E6%9C%AC%E7%94%A8%E6%B3%95/" class="archive-article-date">
-  	<time datetime="2020-12-12T01:26:56.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-12</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/12/Arrays-asList%E5%9F%BA%E6%9C%AC%E7%94%A8%E6%B3%95/">Arrays.asList基本用法</a>
-    </h1>
-  
+      </div>
+    </span>
+  </div>
+</div>
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">java</a>
-        		</li>
-      		
-		</ul>
-	</div>
+<div class="page-modal wx-share js-wx-box">
+    <a class="close js-modal-close" href="javascript:;"><i class="icon icon-close"></i></a>
+    <p>扫一扫，分享到微信</p>
+    <div class="wx-qrcode">
+      <img src="//pan.baidu.com/share/qrcode?url=https://melodycc.gitee.io/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" alt="微信分享二维码">
+    </div>
+</div>
 
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
+<div class="mask js-mask"></div>
+      
+      <div class="clearfix"></div>
+    </div>
   </div>
 </article>
+
   
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%BA%8C%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-11T10:57:25.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-11</time>
-</a>
+<nav id="article-nav">
+  
+  
+    <a href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" id="article-nav-older" class="article-nav-link-wrap">
+      <div class="article-nav-title">为什么response.Body.Close()是必要的</div>
+      <i class="icon-circle-right"></i>
+    </a>
+  
+</nav>
+
+
+<aside class="wrap-side-operation">
+    <div class="mod-side-operation">
+        
+        <div class="jump-container" id="js-jump-container" style="display:none;">
+            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
+                <i class="icon-font icon-back"></i>
+            </a>
+            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
+                <i class="icon-font icon-plane jump-plane"></i>
+            </div>
         </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%BA%8C%EF%BC%89/">从暴力递归到动态规划（二）</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
+        
+        
+        <div class="toc-container tooltip-left">
+            <i class="icon-font icon-category"></i>
+            <div class="tooltip tooltip-east">
+                <span class="tooltip-item">
+                </span>
+                <span class="tooltip-content">
+                    <div class="toc-article">
+                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BC%98%E5%8C%96%E5%89%8D%E7%9A%84%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="toc-number">1.</span> <span class="toc-text">优化前的解决方案</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BC%98%E5%8C%96%E5%90%8E%E7%9A%84%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="toc-number">2.</span> <span class="toc-text">优化后的解决方案</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%9D%E8%80%83"><span class="toc-number">3.</span> <span class="toc-text">思考</span></a></li></ol>
+                    </div>
+                </span>
+            </div>
         </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
+        
+    </div>
+</aside>
+
+
+
   
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%B8%80%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-11T05:34:27.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-11</time>
-</a>
-        </div>
-    	 
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%B8%80%EF%BC%89/">从暴力递归到动态规划（一）</a>
-    </h1>
   
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/08/%E7%BA%BF%E6%AE%B5%E6%A0%91%EF%BC%88%E5%8C%BA%E9%97%B4%E4%BF%AE%E6%94%B9%E6%A0%91%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-08T03:19:07.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-08</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/08/%E7%BA%BF%E6%AE%B5%E6%A0%91%EF%BC%88%E5%8C%BA%E9%97%B4%E4%BF%AE%E6%94%B9%E6%A0%91%EF%BC%89/">线段树（区间修改树）</a>
-    </h1>
   
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-  
-    </div></section>
   
 
-    
-    <nav id="page-nav">
-      <a class="extend prev" rel="prev" href="/archives/">&amp;laquo; Prev</a><a class="page-number" href="/archives/">1</a><span class="page-number current">2</span><a class="page-number" href="/archives/page/3/">3</a><a class="extend next" rel="next" href="/archives/page/3/">Next &amp;raquo;</a>
-    </nav>
   
 
 
@@ -592,8 +373,8 @@
 	var yiliaConfig = {
 		mathjax: false,
 		isHome: false,
-		isPost: false,
-		isArchive: true,
+		isPost: true,
+		isArchive: false,
 		isTag: false,
 		isCategory: false,
 		open_in_new: false,

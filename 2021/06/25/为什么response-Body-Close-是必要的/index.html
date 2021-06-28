@@ -6,18 +6,22 @@
   <meta name="renderer" content="webkit">
   <meta http-equiv="X-UA-Compatible" content="IE=edge" >
   <link rel="dns-prefetch" href="https://melodycc.gitee.io">
-  <title>Archives | Hexo</title>
+  <title>为什么response.Body.Close()是必要的 | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="个人学习记录">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Hexo">
-<meta property="og:url" content="https://melodycc.gitee.io/archives/page/2/index.html">
+  <meta name="description" content="最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行response.Body.Close()，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析">
+<meta property="og:type" content="article">
+<meta property="og:title" content="为什么response.Body.Close()是必要的">
+<meta property="og:url" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="个人学习记录">
+<meta property="og:description" content="最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行response.Body.Close()，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析">
 <meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
+<meta property="article:published_time" content="2021-06-25T03:31:01.000Z">
+<meta property="article:modified_time" content="2021-06-27T13:47:53.540Z">
 <meta property="article:author" content="eslody">
-<meta property="article:tag" content="技术学习">
+<meta property="article:tag" content="go">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -152,158 +156,91 @@
             <canvas data-colors="#eaeaea" data-sectionHeight="100" data-contentId="js-content" id="myCanvas1" class="anm-canvas"></canvas>
           </div>
           <div id="js-content" class="content-ll">
-            
-  
-  
+            <article id="post-为什么response-Body-Close-是必要的" class="article article-type-post " itemscope itemprop="blogPost">
+  <div class="article-inner">
     
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      为什么response.Body.Close()是必要的
+    </h1>
+  
+
+        
+        <a href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
+  	<time datetime="2021-06-25T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
+</a>
+        
+      </header>
     
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行<code>response.Body.Close()</code>，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析</p>
+<a id="more"></a>
+
+<p>受篇幅和冗余细节的限制，笔者将着重聚焦于整个流程和函数功能的阐释，而不会过分关注无关代码</p>
+<h2 id="验证"><a href="#验证" class="headerlink" title="验证"></a>验证</h2><p>先来简单做个小验证</p>
+<h6 id="不执行response-Body-Close"><a href="#不执行response-Body-Close" class="headerlink" title="不执行response.Body.Close()"></a>不执行<code>response.Body.Close()</code></h6><figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">	<span class="string">&quot;net/http&quot;</span></span><br><span class="line">	<span class="string">&quot;os&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="built_in">println</span>(<span class="string">&quot;pid:&quot;</span>, os.Getpid())</span><br><span class="line">	<span class="keyword">for</span> <span class="literal">true</span> &#123;</span><br><span class="line">		requestWithClose()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">requestWithClose</span><span class="params">()</span></span> &#123;</span><br><span class="line">	resp, err := http.Get(<span class="string">&quot;https://www.baidu.com&quot;</span>)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Printf(<span class="string">&quot;error occurred while fetching page, error: %s&quot;</span>, err.Error())</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">defer</span> resp.Body.Close()</span><br><span class="line">	fmt.Println(<span class="string">&quot;ok&quot;</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h6 id="执行response-Body-Close"><a href="#执行response-Body-Close" class="headerlink" title="执行response.Body.Close()"></a>执行<code>response.Body.Close()</code></h6><figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">	<span class="string">&quot;net/http&quot;</span></span><br><span class="line">	<span class="string">&quot;os&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="built_in">println</span>(<span class="string">&quot;pid:&quot;</span>, os.Getpid())</span><br><span class="line">	<span class="keyword">for</span> <span class="literal">true</span> &#123;</span><br><span class="line">		requestWithNoClose()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">requestWithNoClose</span><span class="params">()</span></span> &#123;</span><br><span class="line">	_, err := http.Get(<span class="string">&quot;https://www.baidu.com&quot;</span>)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Printf(<span class="string">&quot;error occurred while fetching page, error: %s&quot;</span>, err.Error())</span><br><span class="line">	&#125;</span><br><span class="line">	fmt.Println(<span class="string">&quot;ok&quot;</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在程序运行一段时间后，对对应进程执行top指令查看内存情况时，会发现如下结果：</p>
+<p><img src="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png" alt="pic1"></p>
+<p>可以发现如果不执行<code>response.Body.Close()</code>，整个进程所消耗的内存资源是会不断增加的</p>
+<h2 id="流程分析"><a href="#流程分析" class="headerlink" title="流程分析"></a>流程分析</h2><h3 id="引入"><a href="#引入" class="headerlink" title="引入"></a>引入</h3><p>让我们从最开始讲起……</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    <span class="comment">//调用get方法请求获得response</span></span><br><span class="line">    resp, err := http.Get(<span class="string">&quot;https://www.baidu.com&quot;</span>)</span><br><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="built_in">panic</span>(err)</span><br><span class="line">    &#125;</span><br><span class="line">    resp.Body.Close()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>http的get/post等请求最终会调用client.go下的<code>func (c *Client) do(req *Request) (retres *Response, reterr error)</code>这个方法。client就是请求的客户端，一般是采用默认的DefaultClient来作为方法的接收者进行调用</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *Client)</span> <span class="title">do</span><span class="params">(req *Request)</span> <span class="params">(retres *Response, reterr error)</span></span> &#123;</span><br><span class="line">	<span class="comment">//与流程相关的核心代码如下：</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">//……</span></span><br><span class="line">    </span><br><span class="line">	<span class="keyword">for</span> &#123;</span><br><span class="line">        </span><br><span class="line">    	<span class="comment">//……</span></span><br><span class="line">        </span><br><span class="line">        reqs = <span class="built_in">append</span>(reqs, req)</span><br><span class="line">        <span class="keyword">var</span> err error</span><br><span class="line">        <span class="keyword">var</span> didTimeout <span class="function"><span class="keyword">func</span><span class="params">()</span> <span class="title">bool</span></span></span><br><span class="line">    	<span class="comment">//调用 client.send 方法来获取response</span></span><br><span class="line">        <span class="keyword">if</span> resp, didTimeout, err = c.send(req, deadline); err != <span class="literal">nil</span> &#123;</span><br><span class="line">            <span class="comment">// c.send() always closes req.Body</span></span><br><span class="line">            reqBodyClosed = <span class="literal">true</span></span><br><span class="line">            <span class="keyword">if</span> !deadline.IsZero() &amp;&amp; didTimeout() &#123;</span><br><span class="line">                err = &amp;httpError&#123;</span><br><span class="line">                    <span class="comment">// <span class="doctag">TODO:</span> early in cycle: s/Client.Timeout exceeded/timeout or context cancelation/</span></span><br><span class="line">                    err:     err.Error() + <span class="string">&quot; (Client.Timeout exceeded while awaiting headers)&quot;</span>,</span><br><span class="line">                    timeout: <span class="literal">true</span>,</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">            <span class="keyword">return</span> <span class="literal">nil</span>, uerr(err)</span><br><span class="line">        &#125;</span><br><span class="line">        </span><br><span class="line">    	<span class="comment">//……</span></span><br><span class="line">        </span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到，关键的代码实际上就在<code>c.send(req, deadline)</code>这一行，那我们继续进入这个方法中</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *Client)</span> <span class="title">send</span><span class="params">(req *Request, deadline time.Time)</span> <span class="params">(resp *Response, didTimeout <span class="keyword">func</span>()</span> <span class="title">bool</span>, <span class="title">err</span> <span class="title">error</span>)</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> c.Jar != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="keyword">for</span> _, cookie := <span class="keyword">range</span> c.Jar.Cookies(req.URL) &#123;</span><br><span class="line">            req.AddCookie(cookie)</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  <span class="comment">//调用send方法来获取response</span></span><br><span class="line">    resp, didTimeout, err = send(req, c.transport(), deadline)</span><br><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="literal">nil</span>, didTimeout, err</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> c.Jar != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="keyword">if</span> rc := resp.Cookies(); <span class="built_in">len</span>(rc) &gt; <span class="number">0</span> &#123;</span><br><span class="line">            c.Jar.SetCookies(req.URL, rc)</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> resp, <span class="literal">nil</span>, <span class="literal">nil</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>接着进入<code>send(req, c.transport(), deadline)</code>方法中</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">send</span><span class="params">(ireq *Request, rt RoundTripper, deadline time.Time)</span> <span class="params">(resp *Response, didTimeout <span class="keyword">func</span>()</span> <span class="title">bool</span>, <span class="title">err</span> <span class="title">error</span>)</span> &#123;</span><br><span class="line">    </span><br><span class="line">	<span class="comment">//……</span></span><br><span class="line">    <span class="comment">//调用Transport.RoundTrip来处理请求</span></span><br><span class="line">    resp, err = rt.RoundTrip(req)</span><br><span class="line"></span><br><span class="line">	<span class="comment">//……</span></span><br><span class="line">    </span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在进入<code>rt.RoundTrip(req)</code>方法前，我们要先看一下这个方法的接收者——Transport</p>
+<h3 id="Transport"><a href="#Transport" class="headerlink" title="Transport"></a>Transport</h3><figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">type</span> Transport <span class="keyword">struct</span> &#123;</span><br><span class="line">    idleMu     sync.Mutex</span><br><span class="line">    wantIdle   <span class="keyword">bool</span>                                <span class="comment">// user has requested to close all idle conns</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">//缓存空闲连接的地方</span></span><br><span class="line">    idleConn   <span class="keyword">map</span>[connectMethodKey][]*persistConn <span class="comment">// most recently used at end</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">//connectMethodKey =&gt; 空闲连接的chan形成的map</span></span><br><span class="line">    <span class="comment">//有空闲连接放入的时候，首先尝试放入这个chan，方便另一个可能需要连接的goroutine直接使用，如果没有goroutine需要连接，就放入到上面的idleConn里面，便于后面的请求连接复用</span></span><br><span class="line">    idleConnCh <span class="keyword">map</span>[connectMethodKey]<span class="keyword">chan</span> *persistConn</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// DisableKeepAlives, if true, disables HTTP keep-alives and</span></span><br><span class="line">    <span class="comment">// will only use the connection to the server for a single</span></span><br><span class="line">    <span class="comment">// HTTP request.</span></span><br><span class="line">    <span class="comment">//</span></span><br><span class="line">    <span class="comment">// This is unrelated to the similarly named TCP keep-alives.</span></span><br><span class="line">    <span class="comment">//是否开启keepAlive，为true的话，连接不会被复用</span></span><br><span class="line">    <span class="comment">//设成Disable的目的个人猜测应该是因为bool类型默认为false，表示默认开启连接复用</span></span><br><span class="line">    DisableKeepAlives <span class="keyword">bool</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">// MaxIdleConns controls the maximum number of idle (keep-alive)</span></span><br><span class="line">    <span class="comment">// connections across all hosts. Zero means no limit.</span></span><br><span class="line">    <span class="comment">//所有hosts对应的最大的连接总数</span></span><br><span class="line">    MaxIdleConns <span class="keyword">int</span></span><br><span class="line">    </span><br><span class="line">   <span class="comment">//每一个host对应的最大的空闲连接数</span></span><br><span class="line">    MaxIdleConnsPerHost <span class="keyword">int</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">//每一个host对应的最大连接数</span></span><br><span class="line">    MaxConnsPerHost <span class="keyword">int</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>transport实现了RoundTripper接口，该接口只有一个方法<code>RoundTrip()</code>，故transport的入口函数就是<code>RoundTrip()</code>。transport的主要功能其实就是缓存了长连接，用于大量http请求场景下的连接复用，减少发送请求时TCP(TLS)连接建立的时间损耗，同时transport还能对连接做一些限制，如连接超时时间，每个host的最大连接数等</p>
+<h3 id="Transport-roundTrip"><a href="#Transport-roundTrip" class="headerlink" title="Transport.roundTrip"></a>Transport.roundTrip</h3><p>接下来就是重点了</p>
+<p><code>rt.RoundTrip(req)</code>这个方法的主要目的是：</p>
+<blockquote>
+<ol>
+<li>参数校验: scheme, host, method, protocol…</li>
+<li>获取缓存的或新建的连接</li>
+</ol>
+</blockquote>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2>
+      
+
+      
+        <div class="page-reward">
+          <a href="javascript:;" class="page-reward-btn tooltip-top">
+            <div class="tooltip tooltip-east">
+            <span class="tooltip-item">
+              赏
+            </span>
+            <span class="tooltip-content">
+              <span class="tooltip-text">
+                <span class="tooltip-inner">
+                  <p class="reward-p"><i class="icon icon-quo-left"></i>谢谢你请我吃糖果<i class="icon icon-quo-right"></i></p>
+                  <div class="reward-box">
+                    
+                    
+                  </div>
+                </span>
+              </span>
+            </span>
+          </div>
+          </a>
+        </div>
+      
+    </div>
+    <div class="article-info article-info-index">
       
       
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2021" class="archive-year">2021</a>
-        </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/" class="archive-article-date">
-  	<time datetime="2021-03-05T16:25:26.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-06</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">IO多路复用详解</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">Linux</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/" class="archive-article-date">
-  	<time datetime="2021-03-04T02:21:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-04</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">聊聊虚拟内存</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/03/%E6%AD%A3%E5%88%99%E8%A1%A8%E8%BE%BE%E5%BC%8F-Regular-Expression/" class="archive-article-date">
-  	<time datetime="2021-03-03T10:20:49.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-03</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/03/%E6%AD%A3%E5%88%99%E8%A1%A8%E8%BE%BE%E5%BC%8F-Regular-Expression/">正则表达式(Regular Expression)</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">工具</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/03/02/go%E6%8C%87%E5%8D%97%E2%80%94%E2%80%94%E7%BB%83%E4%B9%A0%EF%BC%9Aweb%E7%88%AC%E8%99%AB/" class="archive-article-date">
-  	<time datetime="2021-03-02T07:59:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-02</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/03/02/go%E6%8C%87%E5%8D%97%E2%80%94%E2%80%94%E7%BB%83%E4%B9%A0%EF%BC%9Aweb%E7%88%AC%E8%99%AB/">go指南——练习：web爬虫</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
 	<div class="article-tag tagcloud">
 		<i class="icon-price-tags icon"></i>
 		<ul class="article-tag-list">
@@ -315,260 +252,127 @@
 		</ul>
 	</div>
 
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/02/24/printf%E6%89%A7%E8%A1%8C%E5%8E%9F%E7%90%86/" class="archive-article-date">
-  	<time datetime="2021-02-24T10:25:08.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-02-24</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/02/24/printf%E6%89%A7%E8%A1%8C%E5%8E%9F%E7%90%86/">printf执行原理</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2021/02/23/SYN%E6%B4%AA%E6%B3%9B%E6%94%BB%E5%87%BB%E5%8E%9F%E7%90%86%E5%8F%8A%E9%98%B2%E5%BE%A1/" class="archive-article-date">
-  	<time datetime="2021-02-23T08:03:21.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-02-23</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2021/02/23/SYN%E6%B4%AA%E6%B3%9B%E6%94%BB%E5%87%BB%E5%8E%9F%E7%90%86%E5%8F%8A%E9%98%B2%E5%BE%A1/">SYN洪泛攻击原理及防御</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
       
-        </div></section>
+
       
+
       
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2020" class="archive-year">2020</a>
+        
+<div class="share-btn share-icons tooltip-left">
+  <div class="tooltip tooltip-east">
+    <span class="tooltip-item">
+      <a href="javascript:;" class="share-sns share-outer">
+        <i class="icon icon-share"></i>
+      </a>
+    </span>
+    <span class="tooltip-content">
+      <div class="share-wrap">
+        <div class="share-icons">
+          <a class="weibo share-sns" href="javascript:;" data-type="weibo">
+            <i class="icon icon-weibo"></i>
+          </a>
+          <a class="weixin share-sns wxFab" href="javascript:;" data-type="weixin">
+            <i class="icon icon-weixin"></i>
+          </a>
+          <a class="qq share-sns" href="javascript:;" data-type="qq">
+            <i class="icon icon-qq"></i>
+          </a>
+          <a class="douban share-sns" href="javascript:;" data-type="douban">
+            <i class="icon icon-douban"></i>
+          </a>
+          <a class="qzone share-sns" href="javascript:;" data-type="qzone">
+            <i class="icon icon-qzone"></i>
+          </a>
+          <a class="facebook share-sns" href="javascript:;" data-type="facebook">
+            <i class="icon icon-facebook"></i>
+          </a>
+          <a class="twitter share-sns" href="javascript:;" data-type="twitter">
+            <i class="icon icon-twitter"></i>
+          </a>
+          <a class="google share-sns" href="javascript:;" data-type="google">
+            <i class="icon icon-google"></i>
+          </a>
         </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/12/Arrays-asList%E5%9F%BA%E6%9C%AC%E7%94%A8%E6%B3%95/" class="archive-article-date">
-  	<time datetime="2020-12-12T01:26:56.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-12</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/12/Arrays-asList%E5%9F%BA%E6%9C%AC%E7%94%A8%E6%B3%95/">Arrays.asList基本用法</a>
-    </h1>
-  
+      </div>
+    </span>
+  </div>
+</div>
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">java</a>
-        		</li>
-      		
-		</ul>
-	</div>
+<div class="page-modal wx-share js-wx-box">
+    <a class="close js-modal-close" href="javascript:;"><i class="icon icon-close"></i></a>
+    <p>扫一扫，分享到微信</p>
+    <div class="wx-qrcode">
+      <img src="//pan.baidu.com/share/qrcode?url=https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" alt="微信分享二维码">
+    </div>
+</div>
 
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
+<div class="mask js-mask"></div>
+      
+      <div class="clearfix"></div>
+    </div>
   </div>
 </article>
+
   
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%BA%8C%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-11T10:57:25.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-11</time>
-</a>
+<nav id="article-nav">
+  
+    <a href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" id="article-nav-newer" class="article-nav-link-wrap">
+      <i class="icon-circle-left"></i>
+      <div class="article-nav-title">
+        
+          记一次代码优化的经历
+        
+      </div>
+    </a>
+  
+  
+    <a href="/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/" id="article-nav-older" class="article-nav-link-wrap">
+      <div class="article-nav-title">syn/singleflight源码阅读</div>
+      <i class="icon-circle-right"></i>
+    </a>
+  
+</nav>
+
+
+<aside class="wrap-side-operation">
+    <div class="mod-side-operation">
+        
+        <div class="jump-container" id="js-jump-container" style="display:none;">
+            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
+                <i class="icon-font icon-back"></i>
+            </a>
+            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
+                <i class="icon-font icon-plane jump-plane"></i>
+            </div>
         </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%BA%8C%EF%BC%89/">从暴力递归到动态规划（二）</a>
-    </h1>
-  
-
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
+        
+        
+        <div class="toc-container tooltip-left">
+            <i class="icon-font icon-category"></i>
+            <div class="tooltip tooltip-east">
+                <span class="tooltip-item">
+                </span>
+                <span class="tooltip-content">
+                    <div class="toc-article">
+                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%AA%8C%E8%AF%81"><span class="toc-number">1.</span> <span class="toc-text">验证</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#%E4%B8%8D%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.1.</span> <span class="toc-text">不执行response.Body.Close()</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.2.</span> <span class="toc-text">执行response.Body.Close()</span></a></li></ol></li></ol></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90"><span class="toc-number">2.</span> <span class="toc-text">流程分析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BC%95%E5%85%A5"><span class="toc-number">2.1.</span> <span class="toc-text">引入</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport"><span class="toc-number">2.2.</span> <span class="toc-text">Transport</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport-roundTrip"><span class="toc-number">2.3.</span> <span class="toc-text">Transport.roundTrip</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">3.</span> <span class="toc-text">总结</span></a></li></ol>
+                    </div>
+                </span>
+            </div>
         </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
+        
+    </div>
+</aside>
+
+
+
   
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%B8%80%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-11T05:34:27.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-11</time>
-</a>
-        </div>
-    	 
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/11/%E4%BB%8E%E6%9A%B4%E5%8A%9B%E9%80%92%E5%BD%92%E5%88%B0%E5%8A%A8%E6%80%81%E8%A7%84%E5%88%92%EF%BC%88%E4%B8%80%EF%BC%89/">从暴力递归到动态规划（一）</a>
-    </h1>
   
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      	<div class="article-meta">
-	      	<a href="/2020/12/08/%E7%BA%BF%E6%AE%B5%E6%A0%91%EF%BC%88%E5%8C%BA%E9%97%B4%E4%BF%AE%E6%94%B9%E6%A0%91%EF%BC%89/" class="archive-article-date">
-  	<time datetime="2020-12-08T03:19:07.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2020-12-08</time>
-</a>
-        </div>
-    	 
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2020/12/08/%E7%BA%BF%E6%AE%B5%E6%A0%91%EF%BC%88%E5%8C%BA%E9%97%B4%E4%BF%AE%E6%94%B9%E6%A0%91%EF%BC%89/">线段树（区间修改树）</a>
-    </h1>
   
 
-        <div class="article-info info-on-right">
-          
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">数据结构与算法</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-          
-
-        </div>
-        <div class="clearfix"></div>
-    </header>
-  </div>
-</article>
-  
-  
-    </div></section>
   
 
-    
-    <nav id="page-nav">
-      <a class="extend prev" rel="prev" href="/archives/">&amp;laquo; Prev</a><a class="page-number" href="/archives/">1</a><span class="page-number current">2</span><a class="page-number" href="/archives/page/3/">3</a><a class="extend next" rel="next" href="/archives/page/3/">Next &amp;raquo;</a>
-    </nav>
   
 
 
@@ -592,8 +396,8 @@
 	var yiliaConfig = {
 		mathjax: false,
 		isHome: false,
-		isPost: false,
-		isArchive: true,
+		isPost: true,
+		isArchive: false,
 		isTag: false,
 		isCategory: false,
 		open_in_new: false,

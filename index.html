@@ -154,6 +154,158 @@
           <div id="js-content" class="content-ll">
             
   
+    <article id="post-记一次代码优化的经历" class="article article-type-post  article-index" itemscope itemprop="blogPost">
+  <div class="article-inner">
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/">记一次代码优化的经历</a>
+    </h1>
+  
+
+        
+        <a href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" class="archive-article-date">
+  	<time datetime="2021-06-25T12:13:53.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
+</a>
+        
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>前几天生产机器上的网络监控程序突然挂掉了，排查过后发现是我负责的业务代码复杂度过高。所以将代码重新优化了一下，记录下这次代码优化的过程，权当长个教训</p>
+        
+      
+
+      
+    </div>
+    <div class="article-info article-info-index">
+      
+      
+	<div class="article-tag tagcloud">
+		<i class="icon-price-tags icon"></i>
+		<ul class="article-tag-list">
+			 
+        		<li class="article-tag-list-item">
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">实习记录</a>
+        		</li>
+      		 
+        		<li class="article-tag-list-item">
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">随笔</a>
+        		</li>
+      		
+		</ul>
+	</div>
+
+      
+
+      
+        <p class="article-more-link">
+          <a class="article-more-a" href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/">展开全文 >></a>
+        </p>
+      
+
+      
+      <div class="clearfix"></div>
+    </div>
+  </div>
+</article>
+
+<aside class="wrap-side-operation">
+    <div class="mod-side-operation">
+        
+        <div class="jump-container" id="js-jump-container" style="display:none;">
+            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
+                <i class="icon-font icon-back"></i>
+            </a>
+            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
+                <i class="icon-font icon-plane jump-plane"></i>
+            </div>
+        </div>
+        
+        
+    </div>
+</aside>
+
+
+
+
+  
+    <article id="post-为什么response-Body-Close-是必要的" class="article article-type-post  article-index" itemscope itemprop="blogPost">
+  <div class="article-inner">
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">为什么response.Body.Close()是必要的</a>
+    </h1>
+  
+
+        
+        <a href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
+  	<time datetime="2021-06-25T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
+</a>
+        
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行<code>response.Body.Close()</code>，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析</p>
+        
+      
+
+      
+    </div>
+    <div class="article-info article-info-index">
+      
+      
+	<div class="article-tag tagcloud">
+		<i class="icon-price-tags icon"></i>
+		<ul class="article-tag-list">
+			 
+        		<li class="article-tag-list-item">
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
+        		</li>
+      		
+		</ul>
+	</div>
+
+      
+
+      
+        <p class="article-more-link">
+          <a class="article-more-a" href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">展开全文 >></a>
+        </p>
+      
+
+      
+      <div class="clearfix"></div>
+    </div>
+  </div>
+</article>
+
+<aside class="wrap-side-operation">
+    <div class="mod-side-operation">
+        
+        <div class="jump-container" id="js-jump-container" style="display:none;">
+            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
+                <i class="icon-font icon-back"></i>
+            </a>
+            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
+                <i class="icon-font icon-plane jump-plane"></i>
+            </div>
+        </div>
+        
+        
+    </div>
+</aside>
+
+
+
+
+  
     <article id="post-syn-singleflight源码阅读" class="article article-type-post  article-index" itemscope itemprop="blogPost">
   <div class="article-inner">
     
@@ -755,165 +907,9 @@
 
 
   
-    <article id="post-IO多路复用详解" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">IO多路复用详解</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/" class="archive-article-date">
-  	<time datetime="2021-03-05T16:25:26.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-06</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>&nbsp;</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">Linux</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color1">计算机网络</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-聊聊虚拟内存" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">聊聊虚拟内存</a>
-    </h1>
-  
-
-        
-        <a href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/" class="archive-article-date">
-  	<time datetime="2021-03-04T02:21:46.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-03-04</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>梳理一下操作系统内存管理方面的内容</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color5">操作系统</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
   
     <nav id="page-nav">
-      <span class="page-number current">1</span><a class="page-number" href="/page/2/">2</a><a class="extend next" rel="next" href="/page/2/">Next &amp;raquo;</a>
+      <span class="page-number current">1</span><a class="page-number" href="/page/2/">2</a><a class="page-number" href="/page/3/">3</a><a class="extend next" rel="next" href="/page/2/">Next &amp;raquo;</a>
     </nav>
   
 
@@ -1033,6 +1029,14 @@ return o(i(t),arguments.length<2?void 0:u(arguments[1]))}})},function(t,n,r){var
              
               <li class="article-tag-list-item">
                 <a href="javascript:void(0)" class="js-tag color4">分布式</a>
+              </li>
+             
+              <li class="article-tag-list-item">
+                <a href="javascript:void(0)" class="js-tag color5">实习记录</a>
+              </li>
+             
+              <li class="article-tag-list-item">
+                <a href="javascript:void(0)" class="js-tag color3">随笔</a>
               </li>
             
             <div class="clearfix"></div>
