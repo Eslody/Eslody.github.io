@@ -154,6 +154,80 @@
           <div id="js-content" class="content-ll">
             
   
+    <article id="post-为什么response-Body-Close-是必要的" class="article article-type-post  article-index" itemscope itemprop="blogPost">
+  <div class="article-inner">
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">为什么response.Body.Close()是必要的</a>
+    </h1>
+  
+
+        
+        <a href="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
+  	<time datetime="2021-06-29T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-29</time>
+</a>
+        
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行<code>response.Body.Close()</code>，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析</p>
+        
+      
+
+      
+    </div>
+    <div class="article-info article-info-index">
+      
+      
+	<div class="article-tag tagcloud">
+		<i class="icon-price-tags icon"></i>
+		<ul class="article-tag-list">
+			 
+        		<li class="article-tag-list-item">
+        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
+        		</li>
+      		
+		</ul>
+	</div>
+
+      
+
+      
+        <p class="article-more-link">
+          <a class="article-more-a" href="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">展开全文 >></a>
+        </p>
+      
+
+      
+      <div class="clearfix"></div>
+    </div>
+  </div>
+</article>
+
+<aside class="wrap-side-operation">
+    <div class="mod-side-operation">
+        
+        <div class="jump-container" id="js-jump-container" style="display:none;">
+            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
+                <i class="icon-font icon-back"></i>
+            </a>
+            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
+                <i class="icon-font icon-plane jump-plane"></i>
+            </div>
+        </div>
+        
+        
+    </div>
+</aside>
+
+
+
+
+  
     <article id="post-记一次代码优化的经历" class="article article-type-post  article-index" itemscope itemprop="blogPost">
   <div class="article-inner">
     
@@ -203,80 +277,6 @@
       
         <p class="article-more-link">
           <a class="article-more-a" href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/">展开全文 >></a>
-        </p>
-      
-
-      
-      <div class="clearfix"></div>
-    </div>
-  </div>
-</article>
-
-<aside class="wrap-side-operation">
-    <div class="mod-side-operation">
-        
-        <div class="jump-container" id="js-jump-container" style="display:none;">
-            <a href="javascript:void(0)" class="mod-side-operation__jump-to-top">
-                <i class="icon-font icon-back"></i>
-            </a>
-            <div id="js-jump-plan-container" class="jump-plan-container" style="top: -11px;">
-                <i class="icon-font icon-plane jump-plane"></i>
-            </div>
-        </div>
-        
-        
-    </div>
-</aside>
-
-
-
-
-  
-    <article id="post-为什么response-Body-Close-是必要的" class="article article-type-post  article-index" itemscope itemprop="blogPost">
-  <div class="article-inner">
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">为什么response.Body.Close()是必要的</a>
-    </h1>
-  
-
-        
-        <a href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
-  	<time datetime="2021-06-25T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
-</a>
-        
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行<code>response.Body.Close()</code>，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析</p>
-        
-      
-
-      
-    </div>
-    <div class="article-info article-info-index">
-      
-      
-	<div class="article-tag tagcloud">
-		<i class="icon-price-tags icon"></i>
-		<ul class="article-tag-list">
-			 
-        		<li class="article-tag-list-item">
-        			<a href="javascript:void(0)" class="js-tag article-tag-list-link color3">go</a>
-        		</li>
-      		
-		</ul>
-	</div>
-
-      
-
-      
-        <p class="article-more-link">
-          <a class="article-more-a" href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/">展开全文 >></a>
         </p>
       
 

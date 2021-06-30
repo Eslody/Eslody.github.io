@@ -11,18 +11,18 @@
   <meta name="description" content="最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行response.Body.Close()，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析">
 <meta property="og:type" content="article">
 <meta property="og:title" content="为什么response.Body.Close()是必要的">
-<meta property="og:url" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/index.html">
+<meta property="og:url" content="https://melodycc.gitee.io/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/index.html">
 <meta property="og:site_name" content="Hexo">
 <meta property="og:description" content="最近用go写web时，在网上简单查了下客户端请求的代码，发现有的在读取response后会执行response.Body.Close()，有的则不会。在网上查阅了下发现如果不执行可能会导致goroutine泄漏。本着质疑到底的精神，笔者今天就做个实验验证一下，并对相关源码作一下深入的解析">
 <meta property="og:locale" content="zh_CN">
-<meta property="og:image" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
-<meta property="og:image" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/pic2.png">
-<meta property="article:published_time" content="2021-06-25T03:31:01.000Z">
-<meta property="article:modified_time" content="2021-06-29T12:20:45.027Z">
+<meta property="og:image" content="https://melodycc.gitee.io/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
+<meta property="og:image" content="https://melodycc.gitee.io/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/pic2.png">
+<meta property="article:published_time" content="2021-06-29T03:31:01.000Z">
+<meta property="article:modified_time" content="2021-06-30T06:28:33.811Z">
 <meta property="article:author" content="eslody">
 <meta property="article:tag" content="go">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
+<meta name="twitter:image" content="https://melodycc.gitee.io/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -169,8 +169,8 @@
   
 
         
-        <a href="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
-  	<time datetime="2021-06-25T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-25</time>
+        <a href="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" class="archive-article-date">
+  	<time datetime="2021-06-29T03:31:01.000Z" itemprop="datePublished"><i class="icon-calendar icon"></i>2021-06-29</time>
 </a>
         
       </header>
@@ -187,7 +187,7 @@
 <h6 id="执行response-Body-Close"><a href="#执行response-Body-Close" class="headerlink" title="执行response.Body.Close()"></a>执行<code>response.Body.Close()</code></h6><figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">	<span class="string">&quot;net/http&quot;</span></span><br><span class="line">	<span class="string">&quot;os&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="built_in">println</span>(<span class="string">&quot;pid:&quot;</span>, os.Getpid())</span><br><span class="line">	<span class="keyword">for</span> <span class="literal">true</span> &#123;</span><br><span class="line">		requestWithNoClose()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">requestWithNoClose</span><span class="params">()</span></span> &#123;</span><br><span class="line">	_, err := http.Get(<span class="string">&quot;https://www.baidu.com&quot;</span>)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Printf(<span class="string">&quot;error occurred while fetching page, error: %s&quot;</span>, err.Error())</span><br><span class="line">	&#125;</span><br><span class="line">	fmt.Println(<span class="string">&quot;ok&quot;</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>在程序运行一段时间后，对对应进程执行top指令查看内存情况时，会发现如下结果：</p>
-<p><img src="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png" alt="pic1"></p>
+<p><img src="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/1.png" alt="pic1"></p>
 <p>可以发现如果不执行<code>response.Body.Close()</code>，整个进程所消耗的内存资源是会不断增加的</p>
 <h2 id="流程分析"><a href="#流程分析" class="headerlink" title="流程分析"></a>流程分析</h2><h3 id="引入"><a href="#引入" class="headerlink" title="引入"></a>引入</h3><p>让我们从最开始讲起……</p>
 <figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    <span class="comment">//调用get方法请求获得response</span></span><br><span class="line">    resp, err := http.Get(<span class="string">&quot;https://www.baidu.com&quot;</span>)</span><br><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="built_in">panic</span>(err)</span><br><span class="line">    &#125;</span><br><span class="line">    resp.Body.Close()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
@@ -271,7 +271,9 @@
 </blockquote>
 <p>所以最佳实践是：http请求发出后，如果没有错误，马上声明<code>defer res.Body.Close()</code>，避免资源泄露，然后尽量读完Body，好让连接复用</p>
 <p>最后依旧用一张图来描述下整个流程：</p>
-<p><img src="/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/pic2.png" alt="pic1"></p>
+<p><img src="/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/pic2.png" alt="pic1"></p>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><p><a target="_blank" rel="noopener" href="https://segmentfault.com/a/1190000020086816">Go Http包解析：为什么需要response.Body.Close() - SegmentFault 思否</a></p>
+<p><a target="_blank" rel="noopener" href="https://segmentfault.com/a/1190000024584420">Go中的HTTP请求之——HTTP1.1请求流程分析 - SegmentFault 思否</a></p>
 
       
 
@@ -362,7 +364,7 @@
     <a class="close js-modal-close" href="javascript:;"><i class="icon icon-close"></i></a>
     <p>扫一扫，分享到微信</p>
     <div class="wx-qrcode">
-      <img src="//pan.baidu.com/share/qrcode?url=https://melodycc.gitee.io/2021/06/25/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" alt="微信分享二维码">
+      <img src="//pan.baidu.com/share/qrcode?url=https://melodycc.gitee.io/2021/06/29/%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E6%98%AF%E5%BF%85%E8%A6%81%E7%9A%84/" alt="微信分享二维码">
     </div>
 </div>
 
@@ -376,18 +378,9 @@
   
 <nav id="article-nav">
   
-    <a href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" id="article-nav-newer" class="article-nav-link-wrap">
-      <i class="icon-circle-left"></i>
-      <div class="article-nav-title">
-        
-          记一次代码优化的经历
-        
-      </div>
-    </a>
   
-  
-    <a href="/2021/06/21/syn-singleflight%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB/" id="article-nav-older" class="article-nav-link-wrap">
-      <div class="article-nav-title">syn/singleflight源码阅读</div>
+    <a href="/2021/06/25/%E8%AE%B0%E4%B8%80%E6%AC%A1%E4%BB%A3%E7%A0%81%E4%BC%98%E5%8C%96%E7%9A%84%E7%BB%8F%E5%8E%86/" id="article-nav-older" class="article-nav-link-wrap">
+      <div class="article-nav-title">记一次代码优化的经历</div>
       <i class="icon-circle-right"></i>
     </a>
   
@@ -414,7 +407,7 @@
                 </span>
                 <span class="tooltip-content">
                     <div class="toc-article">
-                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%AA%8C%E8%AF%81"><span class="toc-number">1.</span> <span class="toc-text">验证</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#%E4%B8%8D%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.1.</span> <span class="toc-text">不执行response.Body.Close()</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.2.</span> <span class="toc-text">执行response.Body.Close()</span></a></li></ol></li></ol></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90"><span class="toc-number">2.</span> <span class="toc-text">流程分析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BC%95%E5%85%A5"><span class="toc-number">2.1.</span> <span class="toc-text">引入</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport"><span class="toc-number">2.2.</span> <span class="toc-text">Transport</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport-roundTrip"><span class="toc-number">2.3.</span> <span class="toc-text">Transport.roundTrip</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport-getConn"><span class="toc-number">2.4.</span> <span class="toc-text">Transport.getConn</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#Transport-queueForIdleConn"><span class="toc-number">2.4.0.0.1.</span> <span class="toc-text">Transport.queueForIdleConn</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#Transport-queueForDial"><span class="toc-number">2.4.0.0.2.</span> <span class="toc-text">Transport.queueForDial</span></a></li></ol></li></ol></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Transport-dialConn"><span class="toc-number">2.4.1.</span> <span class="toc-text">Transport.dialConn</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#persistConn-roundTrip"><span class="toc-number">2.5.</span> <span class="toc-text">persistConn.roundTrip</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#persistConn-readLoop-amp-persistConn-writeLoop"><span class="toc-number">2.6.</span> <span class="toc-text">persistConn.readLoop&amp;persistConn.writeLoop</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E5%8F%AF%E4%BB%A5%E7%BB%93%E6%9D%9F%E9%98%BB%E5%A1%9E"><span class="toc-number">2.7.</span> <span class="toc-text">为什么response.Body.Close()可以结束阻塞</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">3.</span> <span class="toc-text">总结</span></a></li></ol>
+                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%AA%8C%E8%AF%81"><span class="toc-number">1.</span> <span class="toc-text">验证</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#%E4%B8%8D%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.1.</span> <span class="toc-text">不执行response.Body.Close()</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#%E6%89%A7%E8%A1%8Cresponse-Body-Close"><span class="toc-number">1.0.0.0.2.</span> <span class="toc-text">执行response.Body.Close()</span></a></li></ol></li></ol></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90"><span class="toc-number">2.</span> <span class="toc-text">流程分析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BC%95%E5%85%A5"><span class="toc-number">2.1.</span> <span class="toc-text">引入</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport"><span class="toc-number">2.2.</span> <span class="toc-text">Transport</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport-roundTrip"><span class="toc-number">2.3.</span> <span class="toc-text">Transport.roundTrip</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Transport-getConn"><span class="toc-number">2.4.</span> <span class="toc-text">Transport.getConn</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#Transport-queueForIdleConn"><span class="toc-number">2.4.0.0.1.</span> <span class="toc-text">Transport.queueForIdleConn</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#Transport-queueForDial"><span class="toc-number">2.4.0.0.2.</span> <span class="toc-text">Transport.queueForDial</span></a></li></ol></li></ol></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Transport-dialConn"><span class="toc-number">2.4.1.</span> <span class="toc-text">Transport.dialConn</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#persistConn-roundTrip"><span class="toc-number">2.5.</span> <span class="toc-text">persistConn.roundTrip</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#persistConn-readLoop-amp-persistConn-writeLoop"><span class="toc-number">2.6.</span> <span class="toc-text">persistConn.readLoop&amp;persistConn.writeLoop</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BA%E4%BB%80%E4%B9%88response-Body-Close-%E5%8F%AF%E4%BB%A5%E7%BB%93%E6%9D%9F%E9%98%BB%E5%A1%9E"><span class="toc-number">2.7.</span> <span class="toc-text">为什么response.Body.Close()可以结束阻塞</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">3.</span> <span class="toc-text">总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number">4.</span> <span class="toc-text">参考</span></a></li></ol>
                     </div>
                 </span>
             </div>
