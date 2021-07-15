@@ -23,7 +23,7 @@
 <meta property="og:image" content="https://melodycc.gitee.io/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/6.png">
 <meta property="og:image" content="https://melodycc.gitee.io/2021/03/04/%E8%81%8A%E8%81%8A%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98/7.png">
 <meta property="article:published_time" content="2021-03-04T02:21:46.000Z">
-<meta property="article:modified_time" content="2021-03-09T09:27:52.831Z">
+<meta property="article:modified_time" content="2021-07-15T05:20:20.660Z">
 <meta property="article:author" content="eslody">
 <meta property="article:tag" content="操作系统">
 <meta name="twitter:card" content="summary">
@@ -218,6 +218,8 @@
 <li>已经缓存在主存中，就需要判断出该虚拟页存在于哪个物理页中。</li>
 <li>不在主存中，那么系统必须判断虚拟页存放在磁盘的哪个位置，并且在物理主存中选择一个牺牲页，并将该虚拟页从磁盘复制到主存，替换这个牺牲页。</li>
 </ul>
+<p>顺便说一句，每个进程都拥有一套属于它自己的页表，并且对于每个进程而言都独享了整个4g虚拟地址空间（32位系统）。</p>
+<p>其实，所谓的虚拟地址空间其实是不存在的，我们用页目录和页表来表示它，在使用的时候将其转换为物理内存，这样就完成了映射。在32位的系统中，页目录最多总共有1024个页目录项，每个项有4字节，每个页表最多可以索引1024个内存页，所以页目录可以覆盖的内存空间是1024 * 1024 * 4K（页大小）=4G，刚好是进程可以拥有的最大内存空间，一个进程页目录和页表最多占用1024*4K+4K=4M，所以一个4G的内存空间只需要4M的页表就可以代替，其他的数据会在真正使用的时候才装入物理内存。</p>
 <h2 id="页命中、缺页"><a href="#页命中、缺页" class="headerlink" title="页命中、缺页"></a>页命中、缺页</h2><p>对于如上显示的两种情况，将之定义为页命中和缺页。</p>
 <ul>
 <li>首先，当我们试图读包含在虚拟内存中的一个字时，首先利用MMU将虚拟地址定位到具体的PTE，进而可以通过内存读取它，而如果该页已经被缓存在主存中，，即可直接使用PTE的物理地址定位到该字。</li>
