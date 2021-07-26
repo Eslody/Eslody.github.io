@@ -17,7 +17,7 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:image" content="https://melodycc.gitee.io/2021/03/06/IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8%E8%AF%A6%E8%A7%A3/1.jpg">
 <meta property="article:published_time" content="2021-03-05T16:25:26.000Z">
-<meta property="article:modified_time" content="2021-03-09T08:36:47.018Z">
+<meta property="article:modified_time" content="2021-07-18T05:02:54.657Z">
 <meta property="article:author" content="eslody">
 <meta property="article:tag" content="Linux">
 <meta property="article:tag" content="操作系统">
@@ -211,7 +211,44 @@
 <h6 id="2-socket读写缓冲区工作机制"><a href="#2-socket读写缓冲区工作机制" class="headerlink" title="2.socket读写缓冲区工作机制"></a>2.socket读写缓冲区工作机制</h6><p>每个TCP Socket在内核中都有一个发送缓冲区和一个接收缓冲区， TCP的全双工工作模式以及TCP的滑动窗口就是依赖这两个独立的buffer以及buffer的填充状态。</p>
 <p>对端发送过来数据，内核把数据缓存入接收缓冲区，应用程序一直没有调用read()读取的话，此数据会一直缓存在相应的socket的接收缓冲区。 若应用程序调用read(),会把接收缓冲区的数据读取用应用程序层的buffer。应用程序调用write()或send()时，仅仅是把buffer中的数据copy到socket的发送缓冲区中。write()或send()返回时，data并不一定已经发送到对端了。</p>
 <p>注意，当socket close关闭的时候，输入缓冲区无论是否读完，都会随着socket的消亡而直接释放，而TCP/IP会保证将输出缓冲区内消息全部发送后才释放。</p>
-<h2 id="IO多路复用"><a href="#IO多路复用" class="headerlink" title="IO多路复用"></a>IO多路复用</h2><h3 id="BIO底层通信原理"><a href="#BIO底层通信原理" class="headerlink" title="BIO底层通信原理"></a>BIO底层通信原理</h3>
+<h2 id="IO多路复用"><a href="#IO多路复用" class="headerlink" title="IO多路复用"></a>IO多路复用</h2><p>所谓 I/O 多路复用指的就是 select/epoll 这一系列的多路选择器：支持单一线程同时监听多个文件描述符（I/O 事件），阻塞等待，并在其中某个文件描述符可读写时收到通知。</p>
+<p>首先我们先说一下什么是文件描述符（File descriptor），根据它的英文首字母也简称FD，它是一个用于表述指向文件的引用的抽象化概念。它是一个索引值，指向内核为每一个进程所维护的该进程打开文件的记录表。当程序打开一个现有文件或者创建一个新文件时，内核向进程返回一个文件描述符。</p>
+<h3 id="select"><a href="#select" class="headerlink" title="select"></a>select</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">select</span><span class="params">(<span class="keyword">int</span> nfds,</span></span></span><br><span class="line"><span class="function"><span class="params">            fd_set *<span class="keyword">restrict</span> readfds,</span></span></span><br><span class="line"><span class="function"><span class="params">            fd_set *<span class="keyword">restrict</span> writefds,</span></span></span><br><span class="line"><span class="function"><span class="params">            fd_set *<span class="keyword">restrict</span> errorfds,</span></span></span><br><span class="line"><span class="function"><span class="params">            struct timeval *<span class="keyword">restrict</span> timeout)</span></span>;</span><br></pre></td></tr></table></figure>
+
+<p>writefds、readfds、和exceptfds是三个文件描述符集合。select会遍历每个集合的前nfds个描述符，分别找到可以读取、可以写入、发生错误的描述符，统称为就绪的描述符。这个所谓的描述符集合的数据结构其实就是一个bitmap数组，内核用一个位来表示一个文件描述符，从内核定义来看，一共有1024个位。0/1分别表示不同状态。</p>
+<p>timeout参数表示调用select时的阻塞时长。如果所有文件描述符都未就绪，就阻塞调用进程，直到某个描述符就绪，或者阻塞超过设置的 timeout 后，返回。如果timeout参数设为 NULL，会无限阻塞直到某个描述符就绪；如果timeout参数设为 0，会立即返回，不阻塞。</p>
+<p>select执行时，操作系统把执行select的进程放到响应socket的等待队列中并阻塞，当任何一个 Socket 收到数据后，中断程序将唤起进程。所谓唤起进程，就是将进程从所有的等待队列中移除，加入到工作队列里面。当进程 A 被唤醒后，它知道至少有一个 Socket 接收了数据，此时程序只需遍历一遍fdset，就能找到就绪的描述符。</p>
+<p>这样的问题在于：</p>
+<blockquote>
+<ul>
+<li><p>每次select都需要将进程加入到监视socket的等待队列，每次唤醒都要将进程从socket等待队列移除。这里涉及两次遍历操作，而且每次都要将fdset数组传递给内核，有一定的开销。</p>
+</li>
+<li><p>进程被唤醒后，只能知道有socket接收到了数据，无法知道具体是哪一个socket接收到了数据，所以需要用户进程进行遍历，才能知道具体是哪个socket接收到了数据。当数据量足够大时，会明显降低性能。</p>
+</li>
+</ul>
+</blockquote>
+<p>select和poll其实本质上没有明显区别，只是poll不再采用最大上限1024位的bitmap传递fds，而是采用链表，增加了监视socket的数量。</p>
+<h3 id="epoll"><a href="#epoll" class="headerlink" title="epoll"></a>epoll</h3><p>epoll很好的解决了如上select带来的问题。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//example</span></span><br><span class="line"><span class="keyword">int</span> listenfd = socket(AF_INET, SOCK_STREAM, <span class="number">0</span>);   </span><br><span class="line">bind(listenfd, ...)</span><br><span class="line">listen(listenfd, ...)</span><br><span class="line"></span><br><span class="line"><span class="keyword">int</span> epfd = epoll_create(...);</span><br><span class="line">epoll_ctl(epfd, ...); <span class="comment">//将所有需要监听的fd添加到epfd中</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">while</span>(<span class="number">1</span>)&#123;</span><br><span class="line">    <span class="keyword">int</span> n = epoll_wait(...)</span><br><span class="line">    <span class="keyword">for</span>(接收到数据的socket)&#123;</span><br><span class="line">        <span class="comment">//处理</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>如上epoll的使用实例，先用epoll_create创建一个epoll对象实例eventpoll，同时返回一个引用该实例的文件描述符，返回的文件描述符仅仅指向对应的epoll实例，并不表示真实的磁盘文件节点。</p>
+<p>创建 Epoll 对象后，可以用 epoll_ctl 添加或删除所要监听的Socket fd。同时为fd设置一个回调函数，并监听事件event，并添加到<strong>监听列表</strong>中。当有事件发生时，会调用回调函数，并将fd添加到epoll实例的<strong>就绪列表</strong>上。</p>
+<p>最后调用epoll_wait阻塞监听 epoll 实例上所有的fd的 I/O 事件。当就绪列表中已有数据，那么epoll_wait直接返回，解决了select每次都需要轮询一遍的问题。</p>
+<p>epoll实例内部存储：</p>
+<blockquote>
+<ul>
+<li>监听列表：所有要监听的文件描述符，使用红黑树；</li>
+<li>就绪列表：所有就绪的文件描述符，使用链表；</li>
+</ul>
+</blockquote>
+<p>综上，epoll引入了eventpoll这个中间结构，它通过红黑树来组织所有待监控的socket对象，实现高效的查找，删除和添加。当收到网络数据时，会触发对应的fd的回调函数，这时不是去遍历各个fd的等待队列进行唤醒进程的操作了，而是把收到数据的socket加入到就绪列表（底层是一个双向链表）。eventpoll有个单独的等待队列来维护待唤醒的进程，避免了像select那样每次需要遍历fdset来查找各个fd的等待队列的进程。</p>
+<h2 id="推荐阅读"><a href="#推荐阅读" class="headerlink" title="推荐阅读"></a>推荐阅读</h2><p>本文仅是抛砖引玉，更多细节要看这些：</p>
+<p>select细节剖析：<a target="_blank" rel="noopener" href="https://blog.csdn.net/weixin_42462202/article/details/95315926">Linux select内核源码剖析_JT同学的博客-CSDN博客_linux select源码</a></p>
+<p>epoll细节剖析：<a target="_blank" rel="noopener" href="https://www.cnblogs.com/xuewangkai/articles/11158576.html">epoll使用详解：epoll_create、epoll_ctl、epoll_wait、close - 雾穹 - 博客园 (cnblogs.com)</a></p>
+<p>理解清晰生动形象：<a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/260450151">一文搞懂，网络IO模型 - 知乎 (zhihu.com)</a></p>
+<p>在golang中的引申：[详解Go语言I/O多路复用netpoller模型 - luozhiyun`s Blog](<a target="_blank" rel="noopener" href="https://www.luozhiyun.com/archives/439">https://www.luozhiyun.com/archives/439</a>)</p>
+<p>更深的解析（极力推荐）：<a target="_blank" rel="noopener" href="https://strikefreedom.top/go-netpoll-io-multiplexing-reactor">Strike Freedom</a></p>
+
       
 
       
@@ -361,7 +398,7 @@
                 </span>
                 <span class="tooltip-content">
                     <div class="toc-article">
-                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%89%8D%E8%A8%80"><span class="toc-number">1.</span> <span class="toc-text">前言</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux%E7%B3%BB%E7%BB%9F%E4%B8%AD%E6%96%AD"><span class="toc-number">1.1.</span> <span class="toc-text">Linux系统中断</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E8%B0%83%E7%94%A8"><span class="toc-number">1.2.</span> <span class="toc-text">系统调用</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Socket%E5%9F%BA%E7%A1%80"><span class="toc-number">1.3.</span> <span class="toc-text">Socket基础</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#1-%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">1.3.0.0.1.</span> <span class="toc-text">1.工作流程</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#2-socket%E8%AF%BB%E5%86%99%E7%BC%93%E5%86%B2%E5%8C%BA%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6"><span class="toc-number">1.3.0.0.2.</span> <span class="toc-text">2.socket读写缓冲区工作机制</span></a></li></ol></li></ol></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8"><span class="toc-number">2.</span> <span class="toc-text">IO多路复用</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BIO%E5%BA%95%E5%B1%82%E9%80%9A%E4%BF%A1%E5%8E%9F%E7%90%86"><span class="toc-number">2.1.</span> <span class="toc-text">BIO底层通信原理</span></a></li></ol></li></ol>
+                    <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%89%8D%E8%A8%80"><span class="toc-number">1.</span> <span class="toc-text">前言</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Linux%E7%B3%BB%E7%BB%9F%E4%B8%AD%E6%96%AD"><span class="toc-number">1.1.</span> <span class="toc-text">Linux系统中断</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E8%B0%83%E7%94%A8"><span class="toc-number">1.2.</span> <span class="toc-text">系统调用</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Socket%E5%9F%BA%E7%A1%80"><span class="toc-number">1.3.</span> <span class="toc-text">Socket基础</span></a><ol class="toc-child"><li class="toc-item toc-level-6"><a class="toc-link" href="#1-%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">1.3.0.0.1.</span> <span class="toc-text">1.工作流程</span></a></li><li class="toc-item toc-level-6"><a class="toc-link" href="#2-socket%E8%AF%BB%E5%86%99%E7%BC%93%E5%86%B2%E5%8C%BA%E5%B7%A5%E4%BD%9C%E6%9C%BA%E5%88%B6"><span class="toc-number">1.3.0.0.2.</span> <span class="toc-text">2.socket读写缓冲区工作机制</span></a></li></ol></li></ol></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#IO%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8"><span class="toc-number">2.</span> <span class="toc-text">IO多路复用</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#select"><span class="toc-number">2.1.</span> <span class="toc-text">select</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#epoll"><span class="toc-number">2.2.</span> <span class="toc-text">epoll</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8E%A8%E8%8D%90%E9%98%85%E8%AF%BB"><span class="toc-number">3.</span> <span class="toc-text">推荐阅读</span></a></li></ol>
                     </div>
                 </span>
             </div>
